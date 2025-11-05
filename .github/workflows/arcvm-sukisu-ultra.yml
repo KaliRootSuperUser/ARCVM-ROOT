@@ -61,7 +61,7 @@ jobs:
       - name: 5. Apply All Patches
         run: |
           cd "$BUILD_DIR"
-          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-5.10 susfs
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.10 susfs
           git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git
 
           cd kernel_source
