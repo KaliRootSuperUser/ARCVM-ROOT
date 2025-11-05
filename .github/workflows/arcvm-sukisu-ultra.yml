@@ -58,6 +58,11 @@ jobs:
           sed -i "s/DKSU_VERSION=12800/DKSU_VERSION=$KSU_VERSION/" ../Makefile
           echo "SukiSU Ultra v$KSU_VERSION injected"
 
+      - name: Disable Werror for KPM module
+        run: |
+          cd "$BUILD_DIR/kernel_source/drivers/kernelsu/kpm"
+          echo "CFLAGS_kpm.o := -Wno-error" >> Makefile
+
       - name: 5. Apply All Patches
         run: |
           cd "$BUILD_DIR"
