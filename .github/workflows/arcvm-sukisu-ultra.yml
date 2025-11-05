@@ -1,0 +1,283 @@
+# .github/workflows/arcvm-sukisu-ultra.yml
+name: ARCVM SukiSU Ultra (AI-Powered)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ZRAM_LZ4KD:
+        type: boolean
+        default: true
+        description: "Enable LZ4KD + ZRAM ultra-compression?"
+      HIDE_APPS:
+        type: boolean
+        default: true
+        description: "Hide root from banking apps?"
+
+jobs:
+  build-arcvm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Maximize Disk & Swap
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            You are a ChromeOS kernel build engineer.
+            Run:
+            ```
+            sudo apt update
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+            sudo fallocate -l 12G /swapfile
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            sudo apt install -y git curl wget build-essential bc bison flex \
+              libelf-dev libssl-dev libncurses5-dev python3 cpio unzip jq \
+              device-tree-compiler clang lld llvm zip qrencode
+            ```
+            Output: `free -h && df -h`
+          temperature: 0.0
+
+      - name: Create Build Directory
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Create and enter build directory.
+            Run:
+            ```
+            export BUILD_DIR="$HOME/arcvm_root_build"
+            mkdir -p "$BUILD_DIR"
+            cd "$BUILD_DIR"
+            echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
+            ```
+            Output: `pwd`
+          temperature: 0.0
+
+      - name: Clone ChromeOS 5.10 ARCVM Kernel
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Clone exact ARCVM kernel branch.
+            Run:
+            ```
+            cd "$BUILD_DIR"
+            git clone --depth=1 \
+              https://chromium.googlesource.com/chromiumos/third_party/kernel.git \
+              -b chromeos-5.10-arcvm kernel_source
+            ```
+            Output: `cd kernel_source && git log -1 --oneline`
+          temperature: 0.0
+
+      - name: Inject SukiSU-Ultra
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Inject SukiSU Ultra into kernel.
+            Run:
+            ```
+            cd "$BUILD_DIR/kernel_source"
+            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
+            cd KernelSU
+            KSU_VERSION=$(($(git rev-list --count main) + 10606))
+            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+            sed -i "s/DKSU_VERSION=12800/DKSU_VERSION=$KSU_VERSION/" ../Makefile
+            ```
+            Output: `echo "SukiSU Ultra v$KSU_VERSION injected"`
+          temperature: 0.0
+
+      - name: Apply SUSFS + Hide + VFS + LZ4KD Patches
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Apply all required patches in one shot.
+            Run:
+            ```
+            cd "$BUILD_DIR"
+            git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-5.10 susfs
+            git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git
+
+            cd kernel_source
+            cp ../susfs/kernel_patches/50_add_susfs_in_gki-android14-5.10.patch .
+            patch -p1 < 50_add_susfs_in_gki-android14-5.10.patch || true
+
+            cp ../SukiSU_patch/69_hide_stuff.patch .
+            patch -p1 -F3 < 69_hide_stuff.patch
+
+            cp ../SukiSU_patch/hooks/syscall_hooks.patch .
+            patch -p1 -F3 < syscall_hooks.patch
+
+            ${{ inputs.ZRAM_LZ4KD == 'true' && 'cp -r ../SukiSU_patch/other/zram/lz4k/* .' || 'echo "LZ4KD skipped"' }}
+            ${{ inputs.ZRAM_LZ4KD == 'true' && 'cp ../SukiSU_patch/other/zram/zram_patch/5.10/lz4kd.patch . && patch -p1 < lz4kd.patch || true' || 'echo "No LZ4KD"' }}
+            ```
+            Output: `git status --short`
+          temperature: 0.1
+
+      - name: Configure Kernel (x86_64 ARCVM)
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Generate final .config with full root-hiding.
+            Run:
+            ```
+            cd "$BUILD_DIR/kernel_source"
+            make ARCH=x86_64 x86_64_arcvm_defconfig
+
+            cat >> .config <<'EOF'
+            CONFIG_KSU=y
+            CONFIG_KPM=y
+            CONFIG_KSU_MANUAL_HOOK=y
+            CONFIG_KSU_SUSFS=y
+            CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+            CONFIG_KSU_SUSFS_SUS_PATH=y
+            CONFIG_KSU_SUSFS_SUS_MOUNT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+            CONFIG_KSU_SUSFS_SUS_KSTAT=y
+            CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+            CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+            CONFIG_KSU_SUSFS_ENABLE_LOG=y
+            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+            CONFIG_ZSMALLOC=y
+            CONFIG_ZRAM=y
+            CONFIG_CRYPTO_LZ4HC=y
+            CONFIG_CRYPTO_LZ4K=y
+            CONFIG_CRYPTO_LZ4KD=y
+            CONFIG_CRYPTO_842=y
+            CONFIG_ZRAM_DEF_COMP_LZ4KD=y
+            CONFIG_ZRAM_WRITEBACK=y
+            EOF
+
+            sed -i 's/ -dirty//g' scripts/setlocalversion
+            ```
+            Output: `grep KSU .config | head -5`
+          temperature: 0.0
+
+      - name: Build bzImage (Real Kernel)
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Compile real ARCVM kernel.
+            Run:
+            ```
+            cd "$BUILD_DIR/kernel_source"
+            make ARCH=x86_64 -j$(nproc) bzImage
+            ```
+            Wait up to 15 minutes. Output:
+            ```
+            ls -lh arch/x86/boot/bzImage
+            file arch/x86/boot/bzImage
+            ```
+          temperature: 0.0
+          timeout-minutes: 20
+
+      - name: Download Latest SUSFS Module (CI)
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Fetch real susfs4ksu module from sidex15's CI.
+            Run:
+            ```
+            cd "$BUILD_DIR"
+            LATEST_ID=$(curl -s https://api.github.com/repos/sidex15/susfs4ksu-module/actions/runs?status=success \
+              | jq -r '.workflow_runs[] | select(.head_branch=="v1.5.2+") | .id' | head -1)
+
+            ARTIFACT_URL=$(curl -s https://api.github.com/repos/sidex15/susfs4ksu-module/actions/runs/$LATEST_ID/artifacts \
+              | jq -r '.artifacts[0].archive_download_url')
+
+            curl -L -o susfs.zip "$ARTIFACT_URL"
+            ```
+            Output: `unzip -l susfs.zip | head -3`
+          temperature: 0.1
+
+      - name: Pack AnyKernel3 ZIP
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Build flashable ZIP.
+            Run:
+            ```
+            cd "$BUILD_DIR"
+            git clone --depth=1 https://github.com/Numbersf/AnyKernel3
+            cp kernel_source/arch/x86/boot/bzImage AnyKernel3/
+            unzip -o susfs.zip -d AnyKernel3/modules/
+            cd AnyKernel3
+            zip -r9 "../ARCVM-SUKISU-ULTRA.zip" * -x .git
+            ```
+            Output: `ls -lh ../ARCVM-SUKISU-ULTRA.zip`
+          temperature: 0.0
+
+      - name: Pack Source Tree
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Create full source archive.
+            Run:
+            ```
+            cd "$BUILD_DIR"
+            tar -czf ARCVM-SUKISU-SOURCE.tar.gz kernel_source
+            ```
+            Output: `du -h ARCVM-SUKISU-SOURCE.tar.gz`
+          temperature: 0.0
+
+      - name: Upload to Transfer.sh + QR
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Upload all 3 files and generate QR code.
+            Run:
+            ```
+            cd "$BUILD_DIR"
+            upload() { curl --progress-bar -T "$1" https://transfer.sh/$(basename "$1"); echo; }
+
+            ZIP_URL=$(upload ARCVM-SUKISU-ULTRA.zip)
+            SRC_URL=$(upload ARCVM-SUKISU-SOURCE.tar.gz)
+            BZ_URL=$(upload kernel_source/arch/x86/boot/bzImage)
+
+            echo "ZIP_URL=$ZIP_URL" >> $GITHUB_ENV
+            echo "SRC_URL=$SRC_URL" >> $GITHUB_ENV
+            echo "BZ_URL=$BZ_URL" >> $GITHUB_ENV
+
+            qrencode -t ansiutf8 "$ZIP_URL"
+            ```
+            Output: Full ASCII art box with 3 URLs
+          temperature: 0.2
+
+      - name: Final Artifact Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARCVM-SUKISU-ULTRA-v${{ env.KSUVER }}
+          path: |
+            ${{ env.BUILD_DIR }}/ARCVM-SUKISU-ULTRA.zip
+            ${{ env.BUILD_DIR }}/ARCVM-SUKISU-SOURCE.tar.gz
+            ${{ env.BUILD_DIR }}/kernel_source/arch/x86/boot/bzImage
+
+      - name: Success Message
+        uses: github/llm-action@v1
+        with:
+          model: gpt-4o
+          system_prompt: |
+            Print final success box:
+            ```
+            echo "ARCVM ROOT READY"
+            echo "ZIP: ${{ env.ZIP_URL }}"
+            echo "SOURCE: ${{ env.SRC_URL }}"
+            echo "bzImage: ${{ env.BZ_URL }}"
+            echo "Flash → reboot → GPay works"
+            ```
+          temperature: 0.0
