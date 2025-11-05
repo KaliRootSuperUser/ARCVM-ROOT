@@ -65,7 +65,7 @@ jobs:
           git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git
 
           cd kernel_source
-          cp ../susfs/kernel_patches/50_add_susfs_in_gki-android14-5.10.patch .
+          cp ../susfs/kernel_patches/50_add_susfs_in_gki-android13-5.10.patch .
           patch -p1 < 50_add_susfs_in_gki-android14-5.10.patch || true
 
           cp ../SukiSU_patch/69_hide_stuff.patch .
