@@ -81,6 +81,11 @@ jobs:
 
           git status --short
 
+      - name: Fix kernel/sched/rt.c printk format
+        run: |
+          cd "$BUILD_DIR/kernel_source"
+          sed -i 's/"(%ld)\\n", rq_of_rt_rq(rt_rq)->cpu, rt_rq->rt_time);/"(%llu)\\n", rq_of_rt_rq(rt_rq)->cpu, rt_rq->rt_time);/g' kernel/sched/rt.c
+
       - name: 6. Configure Kernel
         run: |
           cd "$BUILD_DIR/kernel_source"
