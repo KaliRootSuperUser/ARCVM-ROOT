@@ -1,0 +1,88 @@
+name: Build ChromeOS ARCVM x86_64 - SukiSU Ultra + SuSFS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-x86_64:
+    name: ARCVM x86_64 - SukiSU Ultra + SuSFS
+    runs-on: ubuntu-22.04
+    env:
+      LTO: thin
+
+    steps:
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libelf-dev libssl-dev libncurses-dev \
+            build-essential ca-certificates git wget curl bash \
+            device-tree-compiler python3 rsync \
+            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
+
+          sudo ln -sf python3 /usr/bin/python
+
+          # Install LLVM 14 (required by ChromeOS GKI)
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 14 all
+          rm llvm.sh
+
+          for tool in clang ld.lld llvm-objdump llvm-ar llvm-nm llvm-strip llvm-objcopy llvm-readelf clang++; do
+            sudo ln -sf /usr/bin/${tool}-14 /usr/bin/$tool
+          done
+
+      - name: Checkout ChromeOS ARCVM Kernel (chromeos-5.10-arcvm)
+        run: |
+          git clone --depth=1 -b chromeos-5.10-arcvm \
+            https://chromium.googlesource.com/chromiumos/third_party/kernel.git \
+            kernel
+
+      - name: Extract Kernel Version
+        working-directory: kernel
+        run: |
+          VER=$(grep -E '^VERSION = ' Makefile | awk '{print $3}')
+          PAT=$(grep -E '^PATCHLEVEL = ' Makefile | awk '{print $3}')
+          SUB=$(grep -E '^SUBLEVEL = ' Makefile | awk '{print $3}')
+          echo "version=${VER}.${PAT}.${SUB}" >> $GITHUB_ENV
+
+      - name: Integrate SukiSU Ultra + SuSFS (via official script)
+        working-directory: kernel
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
+
+      - name: Add Missing SuSFS Module (fixes linux/susfs.h not found)
+        working-directory: kernel
+        run: |
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git susfs-tmp
+          cp -r susfs-tmp/susfs drivers/
+          rm -rf susfs-tmp
+
+          # Ensure drivers/Makefile and Kconfig include susfs
+          echo 'obj-$(CONFIG_SUSFS) += susfs/' >> drivers/Makefile
+          sed -i '/source "drivers\/char\/Kconfig"/a source "drivers/susfs/Kconfig"' drivers/Kconfig
+
+      - name: Build x86_64 bzImage
+        working-directory: kernel
+        run: |
+          # Load GKI x86_64 config
+          . build.config.gki.x86_64
+
+          make LLVM=1 LLVM_IAS=1 mrproper
+          make LLVM=1 LLVM_IAS=1 x86_64_arcvm_defconfig
+
+          # Force enable required configs
+          scripts/config --file .config \
+            -e LTO_CL00 -e THINLTO -e LTO_CLANG_THIN \
+            -e SUSFS
+
+          make LLVM=1 LLVM_IAS=1 -j$(nproc) bzImage modules
+
+          ls -lh arch/x86_64/boot/bzImage
+          echo "file_path=$(pwd)/arch/x86_64/boot/bzImage" >> $GITHUB_ENV
+
+      - name: Upload bzImage (SukiSU Ultra + SuSFS)
+        uses: actions/upload-artifact@v5
+        with:
+          name: ARCVM-x86_64-bzImage-SukiSU-Ultra-SuSFS-${{ env.version }}
+          path: ${{ env.file_path }}
