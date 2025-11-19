@@ -1,426 +1,97 @@
-name: ARCVM SukiSU Ultra
+name: Build Kernel - ChromeOS ARCVM + SukiSU Ultra + SuSFS
 on:
+  workflow_call:
   workflow_dispatch:
-    inputs:
-      ZRAM_LZ4KD:
-        type: boolean
-        default: true
-        description: "LZ4KD + ZRAM ultra-compression?"
-      HIDE_APPS:
-        type: boolean
-        default: true
-        description: "Hide root from banking apps?"
+
+env:
+  git_tag: chromeos-5.10-arcvm
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: read
+    if: github.event_name != 'pull_request' || (github.event_name == 'pull_request' && !github.event.pull_request.draft)
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            kernel_image_name: bzImage
+            build_config: build.config.gki.x86_64
+            defconfig: x86_64_arcvm_defconfig
+          - arch: arm64
+            kernel_image_name: Image
+            build_config: build.config.gki.aarch64
+            defconfig: arm64_arcvm_defconfig
+
+    name: Build ChromeOS ARCVM + SukiSU Ultra + SuSFS (${{ matrix.arch }})
+    runs-on: ubuntu-22..ru
+    env:
+      LTO: thin
+      ROOT_DIR: /
+      KERNEL_DIR: ${{ github.workspace }}/kernel
 
     steps:
-      - name: 1. Maximize Disk & Swap
+      - name: Install Build Tools
         run: |
-          sudo apt update
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          sudo fallocate -l 12G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          sudo apt install -y git curl wget build-essential bc bison flex \
-            libelf-dev libssl-dev libncurses5-dev python3 cpio unzip jq \
-            device-tree-compiler clang lld llvm zip qrencode
-          free -h && df -h
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bc \
+              bison build-essential ca-certificates flex git gnupg \
+              libelf-dev libssl-dev lsb-release software-properties-common wget \
+              libncurses-dev binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu nuget gzip \
+              rsync python3 device-tree-compiler curl bash
 
-      - name: 2. Create Build Directory
-        run: |
-          export BUILD_DIR="$HOME/arcvm_root_build"
-          mkdir -p "$BUILD_DIR"
-          cd "$BUILD_DIR"
-          echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
-          pwd
+          sudo ln -s --force python3 /usr/bin/python
 
-      - name: 3. Clone ChromeOS 5.10 ARCVM Kernel
-        run: |
-          cd "$BUILD_DIR"
-          git clone --depth=1 \
-            https://chromium.googlesource.com/chromiumos/third_party/kernel.git \
-            -b chromeos-5.10-arcvm kernel_source
-          cd kernel_source && git log -1 --oneline
+          export LLVM_VERSION=14
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh $LLVM_VERSION all
+          rm ./llvm.sh
+          for tool in clang ld.lld llvm-objdump llvm-ar llvm-nm llvm-strip llvm-objcopy llvm-readelf clang++; do
+            sudo ln -sf /usr/bin/${tool}-$LLVM_VERSION /usr/bin/$tool
+          done
 
-      - name: 4. Inject SukiSU-Ultra
+      - name: Checkout kernel source
         run: |
-          cd "$BUILD_DIR/kernel_source"
+          git clone https://chromium.googlesource.com/chromiumos/third_party/kernel.git -b ${{ env.git_tag }} --depth=1 kernel
+
+      - name: Extract kernel version
+        working-directory: kernel
+        run: |
+          VERSION=$(grep -E '^VERSION = ' Makefile | awk '{print $3}')
+          PATCHLEVEL=$(grep -E '^PATCHLEVEL = ' Makefile | awk '{print $3}')
+          SUBLEVEL=$(grep -E '^SUBLEVEL = ' Makefile | awk '{print $3}')
+          EXTRAVERSION=$(grep -E '^EXTRAVERSION = ' Makefile | awk '{print $3}')
+          echo "ChromeOS ARCVM Linux kernel version: $VERSION.$PATCHLEVEL.$SUBLEVEL$EXTRAVERSION"
+          echo "version=$VERSION.$PATCHLEVEL.$SUBLEVEL$EXTRAVERSION" >> $GITHUB_ENV
+
+      - name: Integrate SukiSU Ultra + SuSFS (susfs-main)
+        working-directory: kernel
+        run: |
+          echo "[+] Applying SukiSU Ultra + SuSFS (susfs-main) via official script..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
-          cd KernelSU
-          KSU_VERSION=$(($(git rev-list --count main) + 10606))
-          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-          sed -i "s/DKSU_VERSION=12800/DKSU_VERSION=$KSU_VERSION/" ../Makefile
-          echo "SukiSU Ultra v$KSU_VERSION injected"
+          echo "SukiSU Ultra + SuSFS integration completed."
 
-      - name: Disable Werror for KPM module
-        run: |
-          cd "$BUILD_DIR/kernel_source/drivers/kernelsu/kpm"
-          echo "CFLAGS_kpm.o := -Wno-error" >> Makefile
-
-      - name: Fix KPM Module Issues
-        run: |
-          cd "$BUILD_DIR/kernel_source/drivers/kernelsu/kpm"
-          cat > kpm.c << 'EOF'
-         /* SPDX-License-Identifier: GPL-2.0-or-later */
-      /*
-       * Copyright (C) 2025 Liankong (xhsw.new @outlook.com). All Rights Reserved.
-       * 本代码由GPL-2授权
-       * 
-       * 适配KernelSU的KPM 内核模块加载器兼容实现
-       * 
-       * 集成了 ELF 解析、内存布局、符号处理、重定位（支持 ARM64 重定位类型）
-       * 并参照KernelPatch的标准KPM格式实现加载和控制
-       */
-
-      #include <linux/export.h>
-      #include <linux/module.h>
-      #include <linux/kernel.h>
-      #include <linux/fs.h>
-      #include <linux/kernfs.h>
-      #include <linux/file.h>
-      #include <linux/slab.h>
-      #include <linux/vmalloc.h>
-      #include <linux/uaccess.h>
-      #include <linux/elf.h>
-      #include <linux/kallsyms.h>
-      #include <linux/version.h>
-      #include <linux/list.h>
-      #include <linux/spinlock.h>
-      #include <linux/rcupdate.h>
-      #include <asm/elf.h>
-      #include <linux/vmalloc.h>      #include <linux/mm.h>
-      #include <linux/string.h>
-      #include <asm/cacheflush.h>
-      #include <linux/module.h>
-      #include <linux/vmalloc.h>
-      #include <linux/set_memory.h>
-      #include <linux/version.h>
-      #include <linux/export.h>
-      #include <linux/slab.h>
-      #include <asm/insn.h>
-      #include <linux/kprobes.h>
-      #include <linux/stacktrace.h>
-      #include <linux/kallsyms.h>
-      #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0) && defined(CONFIG_MODULES)
-      #include <linux/moduleloader.h>
-      #endif
-      #include "kpm.h"
-      #include "compact.h"
-
-      #ifndef NO_OPTIMIZE
-      #if defined(__GNUC__) && !defined(__clang__)
-      #define NO_OPTIMIZE __attribute__((optimize("O0")))
-      #elif defined(__clang__)
-      #define NO_OPTIMIZE __attribute__((optnone))
-      #else
-      #define NO_OPTIMIZE
-      #endif
-      #endif
-
-      noinline NO_OPTIMIZE void sukisu_kpm_load_module_path(const char *path,
-                                                            const char *args, void *ptr, void __user *result)
-      {
-          int res = -1;
-
-          printk("KPM: Stub function called (sukisu_kpm_load_module_path). "
-                 "path=%s args=%s ptr=%p\n", path, args, ptr);
-
-          __asm__ volatile("nop");
-
-          if (copy_to_user(result, &res, sizeof(res)))
-              printk("KPM: Copy to user failed.");
-      }
-      EXPORT_SYMBOL(sukisu_kpm_load_module_path);
-
-      noinline NO_OPTIMIZE void sukisu_kpm_unload_module(const char *name,
-                                                         void *ptr, void __user *result)
-      {
-          int res = -1;
-
-          printk("KPM: Stub function called (sukisu_kpm_unload_module). "
-                 "name=%s ptr=%p\n", name, ptr);
-
-          __asm__ volatile("nop");
-
-          if (copy_to_user(result, &res, sizeof(res)))
-              printk("KPM: Copy to user failed.");
-      }
-      EXPORT_SYMBOL(sukisu_kpm_unload_module);
-
-      noinline NO_OPTIMIZE void sukisu_kpm_num(void __user *result)
-      {
-          int res = 0;
-
-          printk("KPM: Stub function called (sukisu_kpm_num).\n");
-
-          __asm__ volatile("nop");
-
-          if (copy_to_user(result, &res, sizeof(res)))
-              printk("KPM: Copy to user failed.");
-      }
-      EXPORT_SYMBOL(sukisu_kpm_num);
-
-      noinline NO_OPTIMIZE void sukisu_kpm_info(const char *name, void __user *out,
-                                               void __user *result)
-      {
-          int res = -1;
-
-          printk("KPM: Stub function called (sukisu_kpm_info). "
-                 "name=%s buffer=%p\n", name, out);
-
-          __asm__ volatile("nop");
-
-          if (copy_to_user(result, &res, sizeof(res)))
-              printk("KPM: Copy to user failed.");
-      }
-      EXPORT_SYMBOL(sukisu_kpm_info);
-
-      noinline NO_OPTIMIZE void sukisu_kpm_list(void __user *out, unsigned int bufferSize,
-                                               void __user *result)
-      {
-          int res = -1;
-
-          printk("KPM: Stub function called (sukisu_kpm_list). "
-                 "buffer=%p size=%d\n", out, bufferSize);
-
-          if (copy_to_user(result, &res, sizeof(res)))
-              printk("KPM: Copy to user failed.");
-      }
-      EXPORT_SYMBOL(sukisu_kpm_list);
-
-      noinline NO_OPTIMIZE void sukisu_kpm_control(void __user *name, void __user *args,
-                                                  void __user *result)
-      {
-          int res = -1;
-
-          printk("KPM: Stub function called (sukisu_kpm_control). "
-                 "name=%p args=%p\n", name, args);
-
-          __asm__ volatile("nop");
-
-          if (copy_to_user(result, &res, sizeof(res)))
-              printk("KPM: Copy to user failed.");
-      }
-      EXPORT_SYMBOL(sukisu_kpm_control);
-
-      noinline NO_OPTIMIZE void sukisu_kpm_version(void __user *out, unsigned int bufferSize,
-                                                  void __user *result)
-      {
-          int res = -1;
-
-          printk("KPM: Stub function called (sukisu_kpm_version). "
-                 "buffer=%p size=%d\n", out, bufferSize);
-
-          if (copy_to_user(result, &res, sizeof(res)))
-              printk("KPM: Copy to user failed.");
-      }
-      EXPORT_SYMBOL(sukisu_kpm_version);
-
-      int sukisu_handle_kpm(unsigned long arg2, unsigned long arg3, unsigned long arg4,
-                                     unsigned long arg5)
-      {
-          if (arg2 == SUKISU_KPM_LOAD) {
-              char kernel_load_path[256] = { 0 };
-              char kernel_args_buffer[256] = { 0 };
-              long ret;
-
-              if (arg3 == 0)
-                  return -1;
-
-              ret = strncpy_from_user((char *)&kernel_load_path, (const char __user *)arg3, 255);
-              if (ret < 0)
-                  return -EFAULT;
-
-              if (arg4 != 0) {
-                  ret = strncpy_from_user((char *)&kernel_args_buffer, (const char __user *)arg4, 255);
-                  if (ret < 0)
-                      return -EFAULT;
-              }
-
-              sukisu_kpm_load_module_path((const char *)&kernel_load_path,
-                                          (const char *)&kernel_args_buffer, NULL, (void __user *)arg5);
-          } else if (arg2 == SUKISU_KPM_UNLOAD) {
-              char kernel_name_buffer[256] = { 0 };
-              long ret;
-
-              if (arg3 == 0)
-                  return -1;
-
-              ret = strncpy_from_user((char *)&kernel_name_buffer, (const char __user *)arg3, 255);
-              if (ret < 0)
-                  return -EFAULT;
-
-              sukisu_kpm_unload_module((const char *)&kernel_name_buffer, NULL,
-                      (void __user *)arg5);
-          } else if (arg2 == SUKISU_KPM_NUM) {
-              sukisu_kpm_num((void __user *)arg5);
-          } else if (arg2 == SUKISU_KPM_INFO) {
-              char kernel_name_buffer[256] = { 0 };
-              long ret;
-
-              if (arg3 == 0 || arg4 == 0)
-                  return -1;
-
-              ret = strncpy_from_user((char *)&kernel_name_buffer, (const char __user *)arg3, 255);
-              if (ret < 0)
-                  return -EFAULT;
-
-              sukisu_kpm_info((const char *)&kernel_name_buffer, (char __user *)arg4,
-              (void __user *)arg5);
-          } else if (arg2 == SUKISU_KPM_LIST) {
-              sukisu_kpm_list((char __user *)arg3, (unsigned int)arg4, (void __user *)arg5);
-          } else if (arg2 == SUKISU_KPM_CONTROL) {
-              sukisu_kpm_control((char __user *)arg3, (char __user *)arg4, (void __user *)arg5);
-          } else if (arg2 == SUKISU_KPM_VERSION) {
-              sukisu_kpm_version((char __user *)arg3, (unsigned int)arg4, (void __user *)arg5);
-          }
-
-          return 0;
-      }
-      EXPORT_SYMBOL(sukisu_handle_kpm);
-
-      int sukisu_is_kpm_control_code(unsigned long arg2) {
-          return (arg2 >= CMD_KPM_CONTROL &&
-                  arg2 <= CMD_KPM_CONTROL_MAX) ? 1 : 0;
-      }
-
-          EOF
-
-      - name: 5. Apply All Patches
-        run: |
-          cd "$BUILD_DIR"
-          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android13-5.10 susfs
-          git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git
-
-          cd kernel_source
-          cp ../susfs/kernel_patches/50_add_susfs_in_gki-android13-5.10.patch .
-          patch -p1 < 50_add_susfs_in_gki-android14-5.10.patch || true
-
-          cp ../SukiSU_patch/69_hide_stuff.patch .
-          patch -p1 -F3 < 69_hide_stuff.patch
-
-          cp ../SukiSU_patch/hooks/syscall_hooks.patch .
-          patch -p1 -F3 < syscall_hooks.patch
-
-          if [[ "${{ inputs.ZRAM_LZ4KD }}" == "true" ]]; then
-            cp -r ../SukiSU_patch/other/zram/lz4k/* .
-            cp ../SukiSU_patch/other/zram/zram_patch/5.10/lz4kd.patch . && patch -p1 < lz4kd.patch || true
-          fi
-
-          git status --short
-
-      - name: Fix kernel/sched/rt.c printk format
-        run: |
-          cd "$BUILD_DIR/kernel_source"
-          sed -i 's/"(%ld)\\n", rq_of_rt_rq(rt_rq)->cpu, rt_rq->rt_time);/"(%llu)\\n", rq_of_rt_rq(rt_rq)->cpu, rt_rq->rt_time);/g' kernel/sched/rt.c
-
-      - name: 6. Configure Kernel
-        run: |
-          cd "$BUILD_DIR/kernel_source"
-          make ARCH=x86_64 x86_64_arcvm_defconfig
-
-          cat >> .config <<'EOF'
-          CONFIG_KSU=y
-          CONFIG_KPM=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_ZSMALLOC=y
-          CONFIG_ZRAM=y
-          CONFIG_CRYPTO_LZ4HC=y
-          CONFIG_CRYPTO_LZ4K=y
-          CONFIG_CRYPTO_LZ4KD=y
-          CONFIG_CRYPTO_842=y
-          CONFIG_ZRAM_DEF_COMP_LZ4KD=y
-          CONFIG_ZRAM_WRITEBACK=y
-          EOF
-
-          sed -i 's/ -dirty//g' scripts/setlocalversion
-          grep KSU .config | head -5
-
-      - name: 7. Build bzImage
-        timeout-minutes: 20
-        run: |
-          cd "$BUILD_DIR/kernel_source"
-          make ARCH=x86_64 -j$(nproc) bzImage
-          ls -lh arch/x86/boot/bzImage
-          file arch/x86/boot/bzImage
-
-      - name: 8. Download SUSFS Module (CI)
+      - name: Build Kernel
+        working-directory: kernel
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KERNEL_IMAGE_NAME: ${{ matrix.kernel_image_name }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          cd "$BUILD_DIR"
-          LATEST_ID=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/repos/sidex15/susfs4ksu-module/actions/runs?status=success \
-            | jq -r '.workflow_runs[] | select(.head_branch=="v1.5.2+") | .id' | head -1)
+          set -a && . ${{ matrix.build_config }}; set +a
+          export DEFCONFIG=${{ matrix.defconfig }}
 
-          ARTIFACT_URL=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/repos/sidex15/susfs4ksu-module/actions/runs/$LATEST_ID/artifacts \
-            | jq -r '.artifacts[0].archive_download_url')
+          make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} mrproper
+          make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} ${DEFCONFIG} < /dev/null
 
-          curl -L -H "Authorization: Bearer $GITHUB_TOKEN" -o susfs.zip "$ARTIFACT_URL"
-          unzip -l susfs.zip | head -3
+          # Ensure ThinLTO is enabled (required by ChromeOS ARCVM)
+          scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e THINLTO -e LTO_CLANG_THIN
 
-      - name: 9. Pack Flashable ZIP
-        run: |
-          cd "$BUILD_DIR"
-          git clone --depth=1 https://github.com/KaliRootSuperUser/ARCVM-ROOT
-          cp kernel_source/arch/x86/boot/bzImage AnyKernel3/
-          unzip -o susfs.zip -d AnyKernel3/modules/
-          cd AnyKernel3
-          zip -r9 "../ARCVM-SUKISU-ULTRA.zip" * -x .git
-          ls -lh ../ARCVM-SUKISU-ULTRA.zip
+          make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} -j$(nproc) ${KERNEL_IMAGE_NAME} modules prepare-objtool
 
-      - name: 10. Pack Source Tree
-        run: |
-          cd "$BUILD_DIR"
-          tar -czf ARCVM-SUKISU-SOURCE.tar.gz kernel_source
-          du -h ARCVM-SUKISU-SOURCE.tar.gz
+          ls -lh arch/${ARCH}/boot/${KERNEL_IMAGE_NAME}
+          echo "file_path=$(pwd)/arch/${ARCH}/boot/${KERNEL_IMAGE_NAME}" >> $GITHUB_ENV
 
-      - name: 11. Upload & QR Code
-        run: |
-          cd "$BUILD_DIR"
-          upload() { curl --progress-bar -T "$1" https://transfer.sh/$(basename "$1"); echo; }
-
-          ZIP_URL=$(upload ARCVM-SUKISU-ULTRA.zip)
-          SRC_URL=$(upload ARCVM-SUKISU-SOURCE.tar.gz)
-          BZ_URL=$(upload kernel_source/arch/x86/boot/bzImage)
-
-          echo "ZIP_URL=$ZIP_URL" >> $GITHUB_ENV
-          echo "SRC_URL=$SRC_URL" >> $GITHUB_ENV
-          echo "BZ_URL=$BZ_URL" >> $GITHUB_ENV
-
-          qrencode -t ansiutf8 "$ZIP_URL"
-
-      - name: 12. Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload kernel-ARCVM-${{ matrix.arch }}-SukiSU-Ultra-${{ env.version }}
+        uses: actions/upload-artifact@v5
         with:
-          name: ARCVM-SUKISU-ULTRA-v${{ env.KSUVER }}
-          path: |
-            ${{ env.BUILD_DIR }}/ARCVM-SUKISU-ULTRA.zip
-            ${{ env.BUILD_DIR }}/ARCVM-SUKISU-SOURCE.tar.gz
-            ${{ env.BUILD_DIR }}/kernel_source/arch/x86/boot/bzImage
-
-      - name: 13. SUCCESS
-        run: |
-          echo "ARCVM ROOT READY"
-          echo "ZIP: ${{ env.ZIP_URL }}"
-          echo "SOURCE: ${{ env.SRC_URL }}"
-          echo "bzImage: ${{ env.BZ_URL }}"
-          echo "Flash in KernelSU → reboot → GPay works"
+          name: kernel-ARCVM-${{ matrix.arch }}-SukiSU-Ultra-susfs-${{ env.version }}
+          path: ${{ env.file_path }}
