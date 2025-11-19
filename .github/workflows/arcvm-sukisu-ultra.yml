@@ -22,7 +22,7 @@ jobs:
             defconfig: arm64_arcvm_defconfig
 
     name: Build ChromeOS ARCVM + SukiSU Ultra + SuSFS (${{ matrix.arch }})
-    runs-on: ubuntu-22..ru
+    runs-on: ubuntu-22.04
     env:
       LTO: thin
       ROOT_DIR: /
