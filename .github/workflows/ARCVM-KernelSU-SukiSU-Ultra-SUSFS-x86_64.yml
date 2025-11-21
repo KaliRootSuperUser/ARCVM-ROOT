@@ -64,14 +64,14 @@ jobs:
           KERNEL_ROOT="${GITHUB_WORKSPACE}/kernel"
           cd "$KERNEL_ROOT"
           # Correct directory paths relative to kernel root
-          KSU_DIR="kernel/ksu"
+          KSU_DIR="kernel/kernelsu"
           SUSFS_C="fs/susfs.c"
           SUSFS_H="include/linux/susfs.h"
           echo "==> Preparing directory structure..."
           mkdir -p "$KSU_DIR" fs include/linux
           echo "==> Running KernelSU/SukiSU installer..."
           if [ "$KSU_VARIANT" = "Official" ]; then
-            echo "[*] Installing Official KernelSU into kernel/ksu..."
+            echo "[*] Installing Official KernelSU into kernel/kernelsu..."
             if [ ! -f "$KSU_DIR/ksu.c" ]; then
               curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" \
                 | bash -s v0.9.5 -o "$KSU_DIR"
@@ -79,7 +79,7 @@ jobs:
               echo "[=] KernelSU already installed, skipping..."
             fi
           elif [ "$KSU_VARIANT" = "SukiSU" ]; then
-            echo "[*] Installing SukiSU-Ultra into kernel/ksu..."
+            echo "[*] Installing SukiSU-Ultra into kernel/kernelsu..."
             if [ ! -f "$KSU_DIR/ksu.c" ]; then
               curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" \
                 | bash -s susfs-main -o "$KSU_DIR"
@@ -115,11 +115,11 @@ jobs:
           # ------------------------------------------------------------------
           echo "==> Patching Makefiles..."
           # KernelSU Makefile
-          if ! grep -q "ksu/" kernel/Makefile; then
-            echo 'obj-y += ksu/' >> kernel/Makefile
-            echo "[+] Added ksu/ to kernel/Makefile"
+          if ! grep -q "kernelsu/" kernel/Makefile; then
+            echo 'obj-y += kernelsu/' >> kernel/Makefile
+            echo "[+] Added kernelsu/ to kernel/Makefile"
           else
-            echo "[=] kernel/Makefile already contains ksu/"
+            echo "[=] kernel/Makefile already contains kernelsu/"
           fi
           # SUSFS Makefile
           if ! grep -q "susfs.o" fs/Makefile; then
