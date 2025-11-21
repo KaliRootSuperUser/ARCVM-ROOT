@@ -133,8 +133,8 @@ jobs:
           # ------------------------------------------------------------------
           echo "==> Patching Kconfig entries..."
           # KernelSU Kconfig
-          if ! grep -q "config KSU" kernel/Kconfig; then
-            cat << 'EOF' >> kernel/Kconfig
+          if ! grep -q "config KSU" kernel/kernelsu/Kconfig; then
+            cat << 'EOF' >> kernel/kernelsu/Kconfig
           config KSU
               bool "KernelSU root access"
               default y
@@ -441,7 +441,7 @@ jobs:
         working-directory: kernel
         run: |
           echo "[+] Configuring custom KernelSU Kconfig"
-          KCONFIG_FILE=kernel/ksu/Kconfig
+          KCONFIG_FILE=kernel/kernelsu/Kconfig
           # Create the custom Kconfig with the specified structure
           cat << 'EOF' >> "$KCONFIG_FILE"
           menu "KernelSU"
