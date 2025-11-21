@@ -69,132 +69,192 @@ jobs:
           fi
           echo "obj-\$(CONFIG_KSU) += ksu/" >> Makefile
 
-      - name: Configure Kconfig for KernelSU + SUSFS
+      - name: Configure Custom Arch x86_64 KernelSU + SukiSU + SUSFS Kconfig
         working-directory: kernel
         run: |
-          echo "[+] Adding KernelSU + SUSFS to Kconfig"
+          echo "[+] Configuring custom Arch x86_64 KernelSU + SukiSU + SUSFS Kconfig"
           KCONFIG_FILE=$GITHUB_WORKSPACE/kernel/arch/x86/Kconfig
-          cat >> $KCONFIG_FILE << 'EOF'
 
-            menu "KernelSU and SUSFS Support"
-            
-            config KSU
-            	bool "KernelSU"
-            	default y
-            	help Enable KernelSU root solution.
-            
-            if KSU
-            
-            config KSU_FS
-            	bool "KernelSU Filesystem"
-            	default y
-            
-            config KSU_ALLOWLIST
-            	bool "KernelSU Allowlist"
-            	default y
-            
-            config KSU_SUKISU
-            	bool "KernelSU Sukisu"
-            	default y
-            
-            config KSU_DEBUG
-            	bool "KernelSU Debugging"
-            	default y
-            
-            config KPM
-            	bool "Kernel Patch Module (KPM)"
-            	default y
-            
-            config KSU_SUPERCALLS
-            	bool "KernelSU Supercalls"
-            	default y
-            
-            config KSU_ENFORCE
-            	bool "KernelSU Enforce"
-            	default y
-            
-            config KSU_PERMISSIVE
-            	bool "KernelSU Permissive"
-            	default y
-            
-            config KSU_CORE_INIT
-            	bool "KernelSU Core Init"
-            	default y
-            
-            config KSU_KSUD_INIT
-            	bool "KernelSU KSUD Init"
-            	default y
-            
-            config KSU_ALLOWLIST_INIT
-            	bool "KernelSU Allowlist Init"
-            	default y
-            
-            config KSU_GET_ROOT_PROFILE
-            	bool "KernelSU Get Root Profile"
-            	default y
-            
-            config KSU_MANUAL_HOOK
-            	bool "KernelSU Manual Hook"
-            	default y
-            
-            config KSU_SUSFS
-            	bool "SUSFS Support"
-            	default y
-            
-            if KSU_SUSFS
-            
-            config KSU_SUSFS_HAS_MAGIC_MOUNT
-            	bool "SUSFS Magic Mount"
-            	default y
-            
-            config KSU_SUSFS_SUS_PATH
-            	bool "SUSFS Path"
-            	default y
-            
-            config KSU_SUSFS_SUS_MOUNT
-            	bool "SUSFS Mount"
-            	default y
-            
-            config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
-            	bool "SUSFS Auto Add KSU Default Mount"
-            	default y
-            
-            config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
-            	bool "SUSFS Auto Add Bind Mount"
-            	default y
-            
-            config KSU_SUSFS_SUS_KSTAT
-            	bool "SUSFS Kstat"
-            	default y
-            
-            config KSU_SUSFS_TRY_UMOUNT
-            	bool "SUSFS Try Unmount"
-            	default y
-            
-            config KSU_SUSFS_SPOOF_UNAME
-            	bool "SUSFS Spoof Uname"
-            	default y
-            
-            config KSU_SUSFS_ENABLE_LOG
-            	bool "SUSFS Enable Logging"
-            	default y
-            
-            config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-            	bool "SUSFS Hide Symbols"
-            	default y
-            
-            config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-            	bool "SUSFS Spoof Cmdline/Bootconfig"
-            	default y
-            
-            config KSU_SUSFS_OPEN_REDIRECT
-            	bool "SUSFS Open Redirect"
-            	default y
-            
-            endif # KSU_SUSFS
-            endif # KSU
-            endmenu
-            EOF
+          # Add the KernelSU + SUSFS configuration to the existing x86 Kconfig
+          echo '
+
+          # --- KernelSU/SUSFS Configuration ---
+          menu "KernelSU and SUSFS Support"
+
+          config KSU
+          	bool "KernelSU"
+          	default y
+          	help
+          	  Enable support for KernelSU, a root solution for Android kernels.
+          	  This option enables the core functionality of KernelSU.
+
+          if KSU
+
+          config KSU_FS
+          	bool "KernelSU Filesystem"
+          	default y
+          	help
+          	  Enable the KernelSU filesystem support.
+
+          config KSU_ALLOWLIST
+          	bool "KernelSU Allowlist"
+          	default y
+          	help
+          	  Enable the allowlist feature for KernelSU to control root access.
+
+          config KSU_SUKISU
+          	bool "KernelSU Sukisu"
+          	default y
+          	help
+          	  Enable Sukisu support within KernelSU.
+
+          config KSU_DEBUG
+          	bool "KernelSU Debugging"
+          	default y
+          	help
+          	  Enable debugging features and messages for KernelSU.
+
+          config KPM
+          	bool "Kernel Patch Module (KPM)"
+          	default y
+          	help
+          	  Enable the Kernel Patch Module, a dependency for KernelSU.
+
+          config KSU_SUPERCALLS
+          	bool "KernelSU Supercalls"
+          	default y
+          	help
+          	  Enable KernelSU supercalls for advanced functionality.
+
+          config KSU_ENFORCE
+          	bool "KernelSU Enforce"
+          	default y
+          	help
+          	  Enable enforcing mode for KernelSU security policies.
+
+          config KSU_PERMISSIVE
+          	bool "KernelSU Permissive"
+          	default y
+          	help
+          	  Enable permissive mode for KernelSU, useful for debugging.
+
+          config KSU_CORE_INIT
+          	bool "KernelSU Core Init"
+          	default y
+          	help
+          	  Enable core initialization logic for KernelSU.
+
+          config KSU_KSUD_INIT
+          	bool "KernelSU KSUD Init"
+          	default y
+          	help
+          	  Enable initialization of the KSUD daemon.
+
+          config KSU_ALLOWLIST_INIT
+          	bool "KernelSU Allowlist Init"
+          	default y
+          	help
+          	  Enable initialization of the KernelSU allowlist.
+
+          config KSU_GET_ROOT_PROFILE
+          	bool "KernelSU Get Root Profile"
+          	default y
+          	help
+          	  Enable functionality to get the root profile.
+
+          config KSU_MANUAL_HOOK
+          	bool "KernelSU Manual Hook"
+          	default y
+          	help
+          	  Enable manual hooking capabilities for KernelSU.
+
+          # SUSFS Configurations
+          config KSU_SUSFS
+          	bool "SUSFS Support"
+          	default y
+          	help
+          	  Enable SUSFS, a filesystem for hiding kernel modifications.
+
+          if KSU_SUSFS
+
+          config KSU_SUSFS_HAS_MAGIC_MOUNT
+          	bool "SUSFS Magic Mount"
+          	default y
+          	help
+          	  Enable magic mount feature in SUSFS.
+
+          config KSU_SUSFS_SUS_PATH
+          	bool "SUSFS Path"
+          	default y
+          	help
+          	  Configure the SUSFS path.
+
+          config KSU_SUSFS_SUS_MOUNT
+          	bool "SUSFS Mount"
+          	default y
+          	help
+          	  Configure the SUSFS mount point.
+
+          config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+          	bool "SUSFS Auto Add KSU Default Mount"
+          	default y
+          	help
+          	  Automatically add the default KSU mount to SUSFS.
+
+          config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+          	bool "SUSFS Auto Add Bind Mount"
+          	default y
+          	help
+          	  Automatically add bind mounts to SUSFS.
+
+          config KSU_SUSFS_SUS_KSTAT
+          	bool "SUSFS Kstat"
+          	default y
+          	help
+          	  Enable kstat support within SUSFS.
+
+          config KSU_SUSFS_TRY_UMOUNT
+          	bool "SUSFS Try Unmount"
+          	default y
+          	help
+          	  Enable attempting to unmount in SUSFS.
+
+          config KSU_SUSFS_SPOOF_UNAME
+          	bool "SUSFS Spoof Uname"
+          	default y
+          	help
+          	  Enable uname spoofing in SUSFS.
+
+          config KSU_SUSFS_ENABLE_LOG
+          	bool "SUSFS Enable Logging"
+          	default y
+          	help
+          	  Enable logging for SUSFS.
+
+          config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+          	bool "SUSFS Hide Symbols"
+          	default y
+          	help
+          	  Hide KernelSU and SUSFS symbols.
+
+          config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+          	bool "SUSFS Spoof Cmdline/Bootconfig"
+          	default y
+          	help
+          	  Spoof kernel command line or bootconfig via SUSFS.
+
+          config KSU_SUSFS_OPEN_REDIRECT
+          	bool "SUSFS Open Redirect"
+          	default y
+          	help
+          	  Enable open redirect functionality in SUSFS.
+
+          endif # KSU_SUSFS
+
+          endif # KSU
+
+          endmenu' >> $KCONFIG_FILE
+
       - name: Apply SUSFS/SukiSU patches
         working-directory: kernel
         run: |
