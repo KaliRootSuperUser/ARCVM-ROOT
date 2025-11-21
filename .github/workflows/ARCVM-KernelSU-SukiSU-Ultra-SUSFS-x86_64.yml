@@ -109,7 +109,7 @@ jobs:
             echo "[=] include/linux/susfs.h already exists, skipping..."
           fi
           echo "==> Confirming injected files..."
-          ls -l "$KSU_DIR/ksu.c" "$KSU_DIR/ksu.h" "$SUSFS_C" "$SUSFS_H" || exit 1
+          ls -l "$SUSFS_C" "$SUSFS_H" || exit 1
           # ------------------------------------------------------------------
           # Patch Makefiles
           # ------------------------------------------------------------------
