@@ -108,8 +108,7 @@ jobs:
           else
             echo "[=] include/linux/susfs.h already exists, skipping..."
           fi
-          echo "==> Confirming injected files..."
-          ls -l "$SUSFS_C" "$SUSFS_H" || exit 1
+         
           
           # Patch Makefiles
           
