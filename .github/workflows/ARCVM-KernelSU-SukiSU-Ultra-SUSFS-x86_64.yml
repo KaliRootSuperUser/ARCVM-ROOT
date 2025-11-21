@@ -1,0 +1,348 @@
+name: Build SukiSU-Ultra Kernel for ARCVM
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernelsu_variant:
+        description: 'KernelSU Variant'
+        required: true
+        type: choice
+        options:
+          - Official
+          - SukiSU
+        default: 'SukiSU'
+      use_zram:
+        description: 'Use ZRAM/LZ4KD'
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+
+jobs:
+  # 1️⃣ Clone and sync kernel source
+  source-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install repo
+        run: |
+          mkdir -p ~/.bin
+          PATH="${HOME}/.bin:${PATH}"
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+x ~/.bin/repo
+      - name: Sync Source
+        run: git clone https://chromium.googlesource.com/chromiumos/third_party/kernel.git -b chromeos-5.10-arcvm --depth=1 kernel
+      - name: Archive kernel
+        run: tar -cf kernel-source.tar kernel
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-source
+          path: kernel-source.tar
+
+  # 2️⃣ Apply KernelSU + SukiSU + SUSFS patches
+  patch-integration:
+    needs: source-sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download kernel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-source
+      - name: Extract kernel
+        run: tar -xf kernel-source.tar
+      - name: Clone Dependencies
+        run: |
+          echo "[+] Cloning required repositories"
+          git clone https://github.com/ShirkNeko/susfs4ksu.git -b gki-android12-5.10 --depth=1
+          git clone https://github.com/ShirkNeko/SukiSU_patch.git --depth=1
+          git clone https://github.com/Tools-cx-app/kernel_patches.git --depth=1
+      - name: Integrate KernelSU/SukiSU
+        run: |
+          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
+          cd $KERNEL_ROOT
+          if [ "${{ inputs.kernelsu_variant }}" == "Official" ]; then
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
+            curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-main
+          fi
+          echo "obj-\$(CONFIG_KSU) += ksu/" >> Makefile
+
+      - name: Configure Kconfig for KernelSU + SUSFS
+        working-directory: kernel
+        run: |
+          echo "[+] Adding KernelSU + SUSFS to Kconfig"
+          KCONFIG_FILE=$GITHUB_WORKSPACE/kernel/arch/x86/Kconfig
+          cat >> $KCONFIG_FILE << 'EOF'
+
+            menu "KernelSU and SUSFS Support"
+            
+            config KSU
+            	bool "KernelSU"
+            	default y
+            	help Enable KernelSU root solution.
+            
+            if KSU
+            
+            config KSU_FS
+            	bool "KernelSU Filesystem"
+            	default y
+            
+            config KSU_ALLOWLIST
+            	bool "KernelSU Allowlist"
+            	default y
+            
+            config KSU_SUKISU
+            	bool "KernelSU Sukisu"
+            	default y
+            
+            config KSU_DEBUG
+            	bool "KernelSU Debugging"
+            	default y
+            
+            config KPM
+            	bool "Kernel Patch Module (KPM)"
+            	default y
+            
+            config KSU_SUPERCALLS
+            	bool "KernelSU Supercalls"
+            	default y
+            
+            config KSU_ENFORCE
+            	bool "KernelSU Enforce"
+            	default y
+            
+            config KSU_PERMISSIVE
+            	bool "KernelSU Permissive"
+            	default y
+            
+            config KSU_CORE_INIT
+            	bool "KernelSU Core Init"
+            	default y
+            
+            config KSU_KSUD_INIT
+            	bool "KernelSU KSUD Init"
+            	default y
+            
+            config KSU_ALLOWLIST_INIT
+            	bool "KernelSU Allowlist Init"
+            	default y
+            
+            config KSU_GET_ROOT_PROFILE
+            	bool "KernelSU Get Root Profile"
+            	default y
+            
+            config KSU_MANUAL_HOOK
+            	bool "KernelSU Manual Hook"
+            	default y
+            
+            config KSU_SUSFS
+            	bool "SUSFS Support"
+            	default y
+            
+            if KSU_SUSFS
+            
+            config KSU_SUSFS_HAS_MAGIC_MOUNT
+            	bool "SUSFS Magic Mount"
+            	default y
+            
+            config KSU_SUSFS_SUS_PATH
+            	bool "SUSFS Path"
+            	default y
+            
+            config KSU_SUSFS_SUS_MOUNT
+            	bool "SUSFS Mount"
+            	default y
+            
+            config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+            	bool "SUSFS Auto Add KSU Default Mount"
+            	default y
+            
+            config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+            	bool "SUSFS Auto Add Bind Mount"
+            	default y
+            
+            config KSU_SUSFS_SUS_KSTAT
+            	bool "SUSFS Kstat"
+            	default y
+            
+            config KSU_SUSFS_TRY_UMOUNT
+            	bool "SUSFS Try Unmount"
+            	default y
+            
+            config KSU_SUSFS_SPOOF_UNAME
+            	bool "SUSFS Spoof Uname"
+            	default y
+            
+            config KSU_SUSFS_ENABLE_LOG
+            	bool "SUSFS Enable Logging"
+            	default y
+            
+            config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+            	bool "SUSFS Hide Symbols"
+            	default y
+            
+            config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+            	bool "SUSFS Spoof Cmdline/Bootconfig"
+            	default y
+            
+            config KSU_SUSFS_OPEN_REDIRECT
+            	bool "SUSFS Open Redirect"
+            	default y
+            
+            endif # KSU_SUSFS
+            endif # KSU
+            endmenu
+            EOF
+      - name: Apply SUSFS/SukiSU patches
+        working-directory: kernel
+        run: |
+          echo "[+] Applying KernelSU/SUSFS patches"
+          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
+          cp $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch $KERNEL_ROOT/
+          cp -r $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/fs/* $KERNEL_ROOT/fs/
+          cp -r $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/include/linux/* $KERNEL_ROOT/include/linux/
+          if [ "${{ inputs.kernelsu_variant }}" == "Official" ]; then
+            cd $KERNEL_ROOT/KernelSU
+            cp $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+            patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
+          fi
+          cd $KERNEL_ROOT
+          patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android12-5.10.patch || true
+      - name: Apply ZRAM/LZ4KD patches
+        if: ${{ inputs.use_zram }}
+        working-directory: kernel
+        run: |
+          echo "[+] Applying ZRAM/LZ4KD patches"
+          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
+          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k/include/linux/* $KERNEL_ROOT/include/linux/
+          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k/lib/* $KERNEL_ROOT/lib/
+          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k/crypto/* $KERNEL_ROOT/crypto/
+          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k_oplus $KERNEL_ROOT/lib/
+          cd $KERNEL_ROOT
+          cp $GITHUB_WORKSPACE/SukiSU_patch/other/zram/zram_patch/5.10/lz4kd.patch ./
+          patch -p1 -F 3 < lz4kd.patch || true
+          cp $GITHUB_WORKSPACE/SukiSU_patch/other/zram/zram_patch/5.10/lz4k_oplus.patch ./
+          patch -p1 -F 3 < lz4k_oplus.patch || true
+      - name: Apply Hide Detection Patches
+        working-directory: kernel
+        run: |
+          echo "[+] Applying hide detection patches"
+          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
+          if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
+            cp $GITHUB_WORKSPACE/SukiSU_patch/69_hide_stuff.patch ./
+          else
+            cp $GITHUB_WORKSPACE/kernel_patches/69_hide_stuff.patch ./
+          fi
+          patch -p1 -F 3 < 69_hide_stuff.patch || true
+      - name: Archive patched kernel
+        run: tar -cf kernel-patched.tar kernel
+      - name: Upload patched kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-patched
+          path: kernel-patched.tar
+
+  # 3️⃣ Configure kernel flags
+  configuration:
+    needs: patch-integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download patched kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-patched
+      - name: Extract kernel
+        run: tar -xf kernel-patched.tar
+      - name: Configure kernel flags
+        working-directory: kernel
+        run: |
+          echo "[+] Enabling KernelSU + SukiSU + SUSFS CONFIG flags"
+          CONFIG_FILE=arch/x86/configs/x86_64_arcvm_defconfig
+          cat >> $CONFIG_FILE << 'EOF'
+            CONFIG_KSU=y
+            CONFIG_KSU_FS=y
+            CONFIG_KSU_ALLOWLIST=y
+            CONFIG_KSU_SUKISU=y
+            CONFIG_KSU_DEBUG=y
+            CONFIG_KPM=y
+            CONFIG_KSU_SUPERCALLS=y
+            CONFIG_KSU_ENFORCE=y
+            CONFIG_KSU_PERMISSIVE=y
+            CONFIG_KSU_CORE_INIT=y
+            CONFIG_KSU_KSUD_INIT=y
+            CONFIG_KSU_ALLOWLIST_INIT=y
+            CONFIG_KSU_GET_ROOT_PROFILE=y
+            CONFIG_KSU_MANUAL_HOOK=y
+            CONFIG_KSU_SUSFS=y
+            CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+            CONFIG_KSU_SUSFS_SUS_PATH=y
+            CONFIG_KSU_SUSFS_SUS_MOUNT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+            CONFIG_KSU_SUSFS_SUS_KSTAT=y
+            CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+            CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+            CONFIG_KSU_SUSFS_ENABLE_LOG=y
+            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+            CONFIG_KALLSYMS=y
+            CONFIG_KALLSYMS_ALL=y
+            EOF
+      - name: Archive configured kernel
+        run: tar -cf kernel-configured.tar kernel
+      - name: Upload configured kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-configured
+          path: kernel-configured.tar
+
+  # 4️⃣ Build kernel
+  build:
+    needs: configuration
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bc bison build-essential ca-certificates flex git gnupg \
+          libelf-dev libssl-dev lsb-release software-properties-common wget libncurses-dev binutils-aarch64-linux-gnu \
+          gcc-aarch64-linux-gnu gzip rsync python3 device-tree-compiler patch dwarves curl zip
+          sudo ln -s --force python3 /usr/bin/python
+          LLVM_VERSION=14
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh $LLVM_VERSION
+          rm ./llvm.sh
+          sudo ln -s --force /usr/bin/clang-$LLVM_VERSION /usr/bin/clang
+          sudo ln -s --force /usr/bin/ld.lld-$LLVM_VERSION /usr/bin/ld.lld
+          sudo ln -s --force /usr/bin/llvm-objdump-$LLVM_VERSION /usr/bin/llvm-objdump
+          sudo ln -s --force /usr/bin/llvm-ar-$LLVM_VERSION /usr/bin/llvm-ar
+          sudo ln -s --force /usr/bin/llvm-nm-$LLVM_VERSION /usr/bin/llvm-nm
+          sudo ln -s --force /usr/bin/llvm-strip-$LLVM_VERSION /usr/bin/llvm-strip
+          sudo ln -s --force /usr/bin/llvm-objcopy-$LLVM_VERSION /usr/bin/llvm-objcopy
+          sudo ln -s --force /usr/bin/llvm-readelf-$LLVM_VERSION /usr/bin/llvm-readelf
+          sudo ln -s --force /usr/bin/clang++-$LLVM_VERSION /usr/bin/clang++
+      - name: Download configured kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-configured
+      - name: Extract kernel
+        run: tar -xf kernel-configured.tar
+      - name: Build kernel
+        working-directory: kernel
+        run: |
+          make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} mrproper
+          make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} x86_64_arcvm_defconfig < /dev/null
+          scripts/config --file .config -e LTO_CLANG -d LTO_NONE -e LTO_CLANG_THIN -d LTO_CLANG_FULL -e THINLTO
+          make LLVM=1 LLVM_IAS=1 DEPMOD=depmod DTC=dtc O=${PWD} -j$(nproc) bzImage modules prepare-objtool
+      - name: Upload bzImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: suki-kernel-bzImage
+          path: kernel/arch/x86/boot/bzImage
+          retention-days: 5
