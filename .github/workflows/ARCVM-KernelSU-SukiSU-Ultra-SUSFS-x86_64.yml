@@ -90,58 +90,7 @@ jobs:
             echo "[!] Unknown KernelSU variant: $KSU_VARIANT"
             exit 1
           fi
-          # ------------------------------------------------------------------
-          # Inject SUSFS
-          # ------------------------------------------------------------------
-          echo "==> Checking SUSFS files..."
-          if [ ! -f "$SUSFS_C" ]; then
-            echo "[*] Downloading susfs.c..."
-            curl -LS "https://raw.githubusercontent.com/KaliRootSuperUser/SUSFS4KSU-ARCVM/main/kernel_patches/fs/susfs.c" \
-              -o "$SUSFS_C"
-          else
-            echo "[=] fs/susfs.c already exists, skipping..."
-          fi
-          if [ ! -f "$SUSFS_H" ]; then
-            echo "[*] Downloading susfs.h..."
-            curl -LS "https://raw.githubusercontent.com/KaliRootSuperUser/SUSFS4KSU-ARCVM/main/kernel_patches/include/linux/susfs.h" \
-              -o "$SUSFS_H"
-          else
-            echo "[=] include/linux/susfs.h already exists, skipping..."
-          fi
          
-          
-          # Patch Makefiles
-          
-          echo "==> Patching Makefiles..."
-          # KernelSU Makefile
-          if ! grep -q "kernelsu/" kernel/Makefile; then
-            echo 'obj-y += kernelsu/' >> kernel/Makefile
-            echo "[+] Added kernelsu/ to kernel/Makefile"
-          else
-            echo "[=] kernel/Makefile already contains kernelsu/"
-          fi
-          # SUSFS Makefile
-          if ! grep -q "susfs.o" fs/Makefile; then
-            echo 'obj-y += susfs.o' >> fs/Makefile
-            echo "[+] Added susfs.o to fs/Makefile"
-          else
-            echo "[=] fs/Makefile already contains susfs.o"
-          fi
-        
-         
-                      
-          # SUSFS Kconfig
-          if ! grep -q "config SUSFS" fs/Kconfig; then
-            cat << 'EOF' >> fs/Kconfig
-            config SUSFS
-                bool "Enable SUSFS overlay system"
-                default y
-            EOF
-            echo "[+] Added SUSFS Kconfig"
-          else
-            echo "[=] SUSFS Kconfig already exists"
-          fi
-          echo "==> KernelSU + SUSFS integration completed successfully!"
       - name: Configure Custom Arch x86_64 KernelSU + SukiSU + SUSFS Kconfig
         working-directory: kernel
         run: |
