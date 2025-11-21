@@ -21,7 +21,7 @@ on:
 jobs:
   # 1️⃣ Clone and sync kernel source
   source-sync:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Install repo
@@ -43,7 +43,7 @@ jobs:
   # 2️⃣ Apply KernelSU + SukiSU + SUSFS patches
   patch-integration:
     needs: source-sync
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Download kernel artifact
@@ -255,6 +255,104 @@ jobs:
 
           endmenu' >> $KCONFIG_FILE
           
+      
+      - name: Apply SUSFS/SukiSU patches
+        working-directory: kernel
+        run: |
+          echo "[+] Applying KernelSU/SUSFS patches"
+          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
+          cp $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch $KERNEL_ROOT/
+          cp -r $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/fs/* $KERNEL_ROOT/fs/
+          cp -r $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/include/linux/* $KERNEL_ROOT/include/linux/
+          if [ "${{ inputs.kernelsu_variant }}" == "Official" ]; then
+            cd $KERNEL_ROOT/KernelSU
+            cp $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+            patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
+          fi
+          cd $KERNEL_ROOT
+          patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android12-5.10.patch || true
+      - name: Apply ZRAM/LZ4KD patches
+        if: ${{ inputs.use_zram }}
+        working-directory: kernel
+        run: |
+          echo "[+] Applying ZRAM/LZ4KD patches"
+          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
+          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k/include/linux/* $KERNEL_ROOT/include/linux/
+          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k/lib/* $KERNEL_ROOT/lib/
+          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k/crypto/* $KERNEL_ROOT/crypto/
+          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k_oplus $KERNEL_ROOT/lib/
+          cd $KERNEL_ROOT
+          cp $GITHUB_WORKSPACE/SukiSU_patch/other/zram/zram_patch/5.10/lz4kd.patch ./
+          patch -p1 -F 3 < lz4kd.patch || true
+          cp $GITHUB_WORKSPACE/SukiSU_patch/other/zram/zram_patch/5.10/lz4k_oplus.patch ./
+          patch -p1 -F 3 < lz4k_oplus.patch || true
+      - name: Apply Hide Detection Patches
+        working-directory: kernel
+        run: |
+          echo "[+] Applying hide detection patches"
+          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
+          if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
+            cp $GITHUB_WORKSPACE/SukiSU_patch/69_hide_stuff.patch ./
+          else
+            cp $GITHUB_WORKSPACE/kernel_patches/69_hide_stuff.patch ./
+          fi
+          patch -p1 -F 3 < 69_hide_stuff.patch || true
+      - name: Archive patched kernel
+        run: tar -cf kernel-patched.tar kernel
+      - name: Upload patched kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-patched
+          path: kernel-patched.tar
+
+  # 3️⃣ Configure kernel flags
+  configuration:
+    needs: patch-integration
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download patched kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-patched
+      - name: Extract kernel
+        run: tar -xf kernel-patched.tar
+      - name: Configure kernel flags
+        working-directory: kernel
+        run: |
+          echo "[+] Enabling KernelSU + SukiSU + SUSFS CONFIG flags"
+          CONFIG_FILE=arch/x86/configs/x86_64_arcvm_defconfig
+          cat >> $CONFIG_FILE << 'EOF'
+            CONFIG_KSU=y
+            CONFIG_KSU_FS=y
+            CONFIG_KSU_ALLOWLIST=y
+            CONFIG_KSU_SUKISU=y
+            CONFIG_KSU_DEBUG=y
+            CONFIG_KPM=y
+            CONFIG_KSU_SUPERCALLS=y
+            CONFIG_KSU_ENFORCE=y
+            CONFIG_KSU_PERMISSIVE=y
+            CONFIG_KSU_CORE_INIT=y
+            CONFIG_KSU_KSUD_INIT=y
+            CONFIG_KSU_ALLOWLIST_INIT=y
+            CONFIG_KSU_GET_ROOT_PROFILE=y
+            CONFIG_KSU_MANUAL_HOOK=y
+            CONFIG_KSU_SUSFS=y
+            CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+            CONFIG_KSU_SUSFS_SUS_PATH=y
+            CONFIG_KSU_SUSFS_SUS_MOUNT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+            CONFIG_KSU_SUSFS_SUS_KSTAT=y
+            CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+            CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+            CONFIG_KSU_SUSFS_ENABLE_LOG=y
+            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+            CONFIG_KALLSYMS=y
+            CONFIG_KALLSYMS_ALL=y
+            EOF
       - name: Configure Custom KernelSU Kconfig
         working-directory: kernel
         run: |
@@ -262,7 +360,7 @@ jobs:
           KCONFIG_FILE=drivers/kernelsu/Kconfig
 
           # Create the custom Kconfig with the specified structure
-          cat > "$KCONFIG_FILE" << 'EOF'
+          cat >> "$KCONFIG_FILE" << 'EOF'
           menu "KernelSU"
 
           config KSU
@@ -413,103 +511,6 @@ jobs:
           endmenu
           EOF
 
-      - name: Apply SUSFS/SukiSU patches
-        working-directory: kernel
-        run: |
-          echo "[+] Applying KernelSU/SUSFS patches"
-          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
-          cp $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch $KERNEL_ROOT/
-          cp -r $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/fs/* $KERNEL_ROOT/fs/
-          cp -r $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/include/linux/* $KERNEL_ROOT/include/linux/
-          if [ "${{ inputs.kernelsu_variant }}" == "Official" ]; then
-            cd $KERNEL_ROOT/KernelSU
-            cp $GITHUB_WORKSPACE/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
-            patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
-          fi
-          cd $KERNEL_ROOT
-          patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android12-5.10.patch || true
-      - name: Apply ZRAM/LZ4KD patches
-        if: ${{ inputs.use_zram }}
-        working-directory: kernel
-        run: |
-          echo "[+] Applying ZRAM/LZ4KD patches"
-          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
-          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k/include/linux/* $KERNEL_ROOT/include/linux/
-          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k/lib/* $KERNEL_ROOT/lib/
-          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k/crypto/* $KERNEL_ROOT/crypto/
-          cp -r $GITHUB_WORKSPACE/SukiSU_patch/other/zram/lz4k_oplus $KERNEL_ROOT/lib/
-          cd $KERNEL_ROOT
-          cp $GITHUB_WORKSPACE/SukiSU_patch/other/zram/zram_patch/5.10/lz4kd.patch ./
-          patch -p1 -F 3 < lz4kd.patch || true
-          cp $GITHUB_WORKSPACE/SukiSU_patch/other/zram/zram_patch/5.10/lz4k_oplus.patch ./
-          patch -p1 -F 3 < lz4k_oplus.patch || true
-      - name: Apply Hide Detection Patches
-        working-directory: kernel
-        run: |
-          echo "[+] Applying hide detection patches"
-          KERNEL_ROOT=$GITHUB_WORKSPACE/kernel
-          if [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-            cp $GITHUB_WORKSPACE/SukiSU_patch/69_hide_stuff.patch ./
-          else
-            cp $GITHUB_WORKSPACE/kernel_patches/69_hide_stuff.patch ./
-          fi
-          patch -p1 -F 3 < 69_hide_stuff.patch || true
-      - name: Archive patched kernel
-        run: tar -cf kernel-patched.tar kernel
-      - name: Upload patched kernel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-patched
-          path: kernel-patched.tar
-
-  # 3️⃣ Configure kernel flags
-  configuration:
-    needs: patch-integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download patched kernel
-        uses: actions/download-artifact@v4
-        with:
-          name: kernel-patched
-      - name: Extract kernel
-        run: tar -xf kernel-patched.tar
-      - name: Configure kernel flags
-        working-directory: kernel
-        run: |
-          echo "[+] Enabling KernelSU + SukiSU + SUSFS CONFIG flags"
-          CONFIG_FILE=arch/x86/configs/x86_64_arcvm_defconfig
-          cat >> $CONFIG_FILE << 'EOF'
-            CONFIG_KSU=y
-            CONFIG_KSU_FS=y
-            CONFIG_KSU_ALLOWLIST=y
-            CONFIG_KSU_SUKISU=y
-            CONFIG_KSU_DEBUG=y
-            CONFIG_KPM=y
-            CONFIG_KSU_SUPERCALLS=y
-            CONFIG_KSU_ENFORCE=y
-            CONFIG_KSU_PERMISSIVE=y
-            CONFIG_KSU_CORE_INIT=y
-            CONFIG_KSU_KSUD_INIT=y
-            CONFIG_KSU_ALLOWLIST_INIT=y
-            CONFIG_KSU_GET_ROOT_PROFILE=y
-            CONFIG_KSU_MANUAL_HOOK=y
-            CONFIG_KSU_SUSFS=y
-            CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-            CONFIG_KSU_SUSFS_SUS_PATH=y
-            CONFIG_KSU_SUSFS_SUS_MOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-            CONFIG_KSU_SUSFS_SUS_KSTAT=y
-            CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-            CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-            CONFIG_KSU_SUSFS_ENABLE_LOG=y
-            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-            CONFIG_KALLSYMS=y
-            CONFIG_KALLSYMS_ALL=y
-            EOF
       - name: Archive configured kernel
         run: tar -cf kernel-configured.tar kernel
       - name: Upload configured kernel artifact
