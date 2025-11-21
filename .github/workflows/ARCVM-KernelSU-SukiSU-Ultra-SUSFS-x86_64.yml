@@ -110,9 +110,9 @@ jobs:
           fi
           echo "==> Confirming injected files..."
           ls -l "$SUSFS_C" "$SUSFS_H" || exit 1
-          # ------------------------------------------------------------------
+          
           # Patch Makefiles
-          # ------------------------------------------------------------------
+          
           echo "==> Patching Makefiles..."
           # KernelSU Makefile
           if ! grep -q "kernelsu/" kernel/Makefile; then
@@ -128,21 +128,9 @@ jobs:
           else
             echo "[=] fs/Makefile already contains susfs.o"
           fi
-          # ------------------------------------------------------------------
-          # Patch Kconfig
-          # ------------------------------------------------------------------
-          echo "==> Patching Kconfig entries..."
-          # KernelSU Kconfig
-          if ! grep -q "config KSU" kernel/kernelsu/Kconfig; then
-            cat << 'EOF' >> kernel/kernelsu/Kconfig
-          config KSU
-              bool "KernelSU root access"
-              default y
-          EOF
-                      echo "[+] Added KernelSU Kconfig"
-          else
-            echo "[=] KernelSU Kconfig already exists"
-          fi
+        
+         
+                      
           # SUSFS Kconfig
           if ! grep -q "config SUSFS" fs/Kconfig; then
             cat << 'EOF' >> fs/Kconfig
