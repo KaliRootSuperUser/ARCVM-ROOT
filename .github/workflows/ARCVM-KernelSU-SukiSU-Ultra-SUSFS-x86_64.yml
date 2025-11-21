@@ -64,7 +64,7 @@ jobs:
           KERNEL_ROOT="${GITHUB_WORKSPACE}/kernel"
           cd "$KERNEL_ROOT"
           # Correct directory paths relative to kernel root
-          KSU_DIR="$KERNEL_ROOT/kernel/ksu"
+          KSU_DIR="kernel/ksu"
           SUSFS_C="fs/susfs.c"
           SUSFS_H="include/linux/susfs.h"
           echo "==> Preparing directory structure..."
@@ -146,11 +146,11 @@ jobs:
           # SUSFS Kconfig
           if ! grep -q "config SUSFS" fs/Kconfig; then
             cat << 'EOF' >> fs/Kconfig
-          config SUSFS
-              bool "Enable SUSFS overlay system"
-              default y
-          EOF
-                      echo "[+] Added SUSFS Kconfig"
+            config SUSFS
+                bool "Enable SUSFS overlay system"
+                default y
+            EOF
+            echo "[+] Added SUSFS Kconfig"
           else
             echo "[=] SUSFS Kconfig already exists"
           fi
