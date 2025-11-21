@@ -254,6 +254,164 @@ jobs:
           endif # KSU
 
           endmenu' >> $KCONFIG_FILE
+          
+      - name: Configure Custom KernelSU Kconfig
+        working-directory: kernel
+        run: |
+          echo "[+] Configuring custom KernelSU Kconfig"
+          KCONFIG_FILE=$GITHUB_WORKSPACE/kernel/drivers/kernelsu/Kconfig
+
+          # Create the custom Kconfig with the specified structure
+          cat > "$KCONFIG_FILE" << 'EOF'
+          menu "KernelSU"
+
+          config KSU
+                tristate "KernelSU function support"
+                default y
+                help
+                  Enable kernel-level root privileges on Android System.
+
+          config KSU_DEBUG
+                bool "KernelSU debug mode"
+                depends on KSU
+                default y
+                help
+                  Enable KernelSU debug mode.
+
+          config KSU_MULTI_MANAGER_SUPPORT
+              bool "Multi KernelSU manager support"
+              depends on KSU
+              default y
+              help
+                  Enable multi KernelSU manager support
+
+          config KSU_ALLOWLIST_WORKAROUND
+              bool "KernelSU Session Keyring Init workaround"
+              depends on KSU
+              default n
+              help
+                Enable session keyring init workaround for problematic devices.
+
+          config KPM
+                bool "Enable SukiSU KPM"
+                depends on KSU && 64BIT
+                select KALLSYMS
+                select KALLSYMS_ALL
+                default y
+                help
+                  Enabling this option will activate the KPM feature of SukiSU.
+
+          config KSU_MANUAL_HOOK
+              bool "Hook KernelSU manually"
+              depends on KSU != m
+              help
+                If enabled, Hook required KernelSU syscalls with manually-patched function.
+
+          menu "KernelSU - SUSFS"
+
+          config KSU_SUSFS
+          	bool "KernelSU addon - SUSFS"
+          	depends on KSU
+          	depends on THREAD_INFO_IN_TASK
+          	default y
+          	help
+          		Patch and Enable SUSFS to kernel with KernelSU.
+
+          config KSU_SUSFS_SUS_PATH
+          	bool "Enable to hide suspicious path (NOT recommended)"
+          	depends on KSU_SUSFS
+          	default y
+          	help
+          		Allow hiding user-defined paths and sub-paths from system calls.
+
+          config KSU_SUSFS_SUS_MOUNT
+          	bool "Enable to hide suspicious mounts"
+          	depends on KSU_SUSFS
+          	default y
+          	help
+          		Allow hiding user-defined mount paths from /proc/self/[mounts|mountinfo|mountstat].
+
+          config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+          	bool "Enable to hide KSU's default mounts automatically (experimental)"
+          	depends on KSU_SUSFS_SUS_MOUNT
+          	default y
+          	help
+          		Automatically add KSU's default mounts to sus_mount.
+
+          config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+          	bool "Enable to hide suspicious bind mounts automatically (experimental)"
+          	depends on KSU_SUSFS_SUS_MOUNT
+          	default y
+          	help
+          		Automatically add binded mounts to sus_mount.
+
+          config KSU_SUSFS_SUS_KSTAT
+          	bool "Enable to spoof suspicious kstat"
+          	depends on KSU_SUSFS
+          	default y
+          	help
+          		Allow spoofing the kstat of user-defined file/directory.
+
+          config KSU_SUSFS_TRY_UMOUNT
+          	bool "Enable to use ksu's try_umount"
+          	depends on KSU_SUSFS
+          	default y
+          	help
+          		Allow using try_umount to umount other user-defined mount paths.
+
+          config KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+          	bool "Enable to add bind mounts to ksu's try_umount automatically (experimental)"
+          	depends on KSU_SUSFS_TRY_UMOUNT
+          	default y
+          	help
+          		Automatically add binded mounts to ksu's try_umount.
+
+          config KSU_SUSFS_SPOOF_UNAME
+          	bool "Enable to spoof uname"
+          	depends on KSU_SUSFS
+          	default y
+          	help
+          		Allow spoofing the string returned by uname syscall.
+
+          config KSU_SUSFS_ENABLE_LOG
+          	bool "Enable logging susfs log to kernel"
+          	depends on KSU_SUSFS
+          	default y
+          	help
+          		Allow logging susfs log to kernel.
+
+          config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+          	bool "Enable to automatically hide ksu and susfs symbols from /proc/kallsyms"
+          	depends on KSU_SUSFS
+          	default y
+          	help
+          		Automatically hide ksu and susfs symbols from '/proc/kallsyms'.
+
+          config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+          	bool "Enable to spoof /proc/cmdline or /proc/bootconfig"
+          	depends on KSU_SUSFS
+          	default y
+          	help
+          		Spoof the output of /proc/cmdline or /proc/bootconfig with user-defined file.
+
+          config KSU_SUSFS_OPEN_REDIRECT
+          	bool "Enable to redirect a path to be opened with another path (experimental)"
+          	depends on KSU_SUSFS
+          	default n
+          	help
+          		Allow redirecting a target path to be opened with another user-defined path.
+
+          config KSU_SUSFS_SUS_MAP
+          	bool "Enable to hide some mmapped real file from proc maps interfaces"
+          	depends on KSU_SUSFS
+          	default y
+          	help
+          		Allow hiding mmapped real file from /proc/<pid>/[maps|smaps|smaps_rollup|map_files|mem|pagemap]
+
+          endmenu
+
+          endmenu
+          EOF
 
       - name: Apply SUSFS/SukiSU patches
         working-directory: kernel
