@@ -259,7 +259,7 @@ jobs:
         working-directory: kernel
         run: |
           echo "[+] Configuring custom KernelSU Kconfig"
-          KCONFIG_FILE=$GITHUB_WORKSPACE/kernel/drivers/kernelsu/Kconfig
+          KCONFIG_FILE=drivers/kernelsu/Kconfig
 
           # Create the custom Kconfig with the specified structure
           cat > "$KCONFIG_FILE" << 'EOF'
